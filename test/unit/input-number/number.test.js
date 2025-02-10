@@ -1,3 +1,4 @@
+import { describe, it, expect } from 'vitest';
 import { add, subtract, formatThousandths, canInputNumber, canSetValue, formatUnCompleteNumber } from '../../../js/input-number/number';
 
 describe('add', () => {
@@ -121,6 +122,7 @@ describe('canInputNumber', () => {
   it('normal number: number letters are allowed', () => {
     expect(canInputNumber('-')).toBe(true);
     expect(canInputNumber('1.3e')).toBe(true);
+    expect(canInputNumber('+1.22+++')).toBe(false);
     expect(canInputNumber('1.23E')).toBe(true);
     expect(canInputNumber('1.23E+')).toBe(true);
     expect(canInputNumber('1.23E+08')).toBe(true);
@@ -134,7 +136,7 @@ describe('canInputNumber', () => {
   });
 });
 
-describe('canSetValue', () => {
+it('canSetValue', () => {
   expect(canSetValue('2', 1)).toBe(true);
   expect(canSetValue('2', 1)).toBe(true);
   expect(canSetValue('2.0', 2)).toBe(false);

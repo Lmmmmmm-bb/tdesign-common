@@ -1,6 +1,4 @@
-import isUndefined from 'lodash/isUndefined';
-import isBoolean from 'lodash/isBoolean';
-import omit from 'lodash/omit';
+import { isUndefined, isBoolean, omit, get } from 'lodash-es';
 import { TreeNode } from './tree-node';
 import { OptionData } from '../common';
 import {
@@ -58,6 +56,11 @@ export class TreeNodeModel {
   public get loading() {
     const node = this[nodeKey];
     return node.loading;
+  }
+
+  public get disabled() {
+    const node = this[nodeKey];
+    return node.isDisabled();
   }
 
   /**
@@ -252,16 +255,23 @@ export class TreeNodeModel {
    */
   public setData(data: OptionData) {
     const node = this[nodeKey];
+    // syncAttrs 列举的属性，key 名称可被 tree.config.keys 定义
+    // 因此同步状态时需要读取被定义的 key 名称
     // 详细细节可见 https://github.com/Tencent/tdesign-common/issues/655
-    const _data = omit(data, ['children', 'value', 'label']);
+    const syncAttrs = [
+      'value',
+      'label',
+      'disabled',
+    ];
+    const cleanData = omit(data, ['children', ...syncAttrs]) as Partial<TypeTreeNodeData>;
     const { keys } = node.tree.config;
-    const dataValue = data[keys?.value || 'value'];
-    const dataLabel = data[keys?.label || 'label'];
-    if (!isUndefined(dataValue)) _data.value = dataValue;
-    if (!isUndefined(dataLabel)) _data.label = dataLabel;
-
-    Object.assign(node.data, _data);
-    Object.assign(node, _data);
+    syncAttrs.forEach((attr: string) => {
+      const dataAttrValue = get(data, keys?.[attr as keyof typeof keys] || attr);
+      if (!isUndefined(dataAttrValue)) cleanData[attr as keyof typeof keys] = dataAttrValue;
+    });
+    Object.assign(node.data, cleanData);
+    Object.assign(node, cleanData);
+    node.update();
   }
 }
 

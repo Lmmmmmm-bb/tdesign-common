@@ -1,10 +1,6 @@
-import isString from 'lodash/isString';
-import isNull from 'lodash/isNull';
-import isUndefined from 'lodash/isUndefined';
-import isNumber from 'lodash/isNumber';
-import isArray from 'lodash/isArray';
+import { isString, isNull, isUndefined, isNumber, isArray } from 'lodash-es';
 
-export function omit(obj: object, fields: string[]): object {
+export function omit(obj: Record<string, any>, fields: string[]) {
   const shallowCopy = {
     ...obj,
   };
@@ -15,12 +11,24 @@ export function omit(obj: object, fields: string[]): object {
   return shallowCopy;
 }
 
-export function removeEmptyAttrs<T>(obj: T): Partial<T> {
-  const newObj = {};
+export function getValidAttrs<T extends Record<string, any>>(obj: T): Partial<T> {
+  const newObj: Partial<T> = {};
 
   Object.keys(obj).forEach((key) => {
     if (!isUndefined(obj[key]) || isNull(obj[key])) {
-      newObj[key] = obj[key];
+      newObj[key as keyof T] = obj[key];
+    }
+  });
+
+  return newObj;
+}
+
+export function removeEmptyAttrs<T extends Record<string, any>>(obj: T): Partial<T> {
+  const newObj: Partial<T> = {};
+
+  Object.keys(obj).forEach((key) => {
+    if (!isUndefined(obj[key]) || isNull(obj[key])) {
+      newObj[key as keyof T] = obj[key];
     }
   });
 
@@ -61,7 +69,7 @@ export function getBackgroundColor(color: string | string[] | LinearGradient): s
       const c = parseFloat(a.substr(0, a.length - 1)) - parseFloat(b.substr(0, b.length - 1));
       return c;
     });
-    const tempArr = keys.map((key: any) => `${rest[key]} ${key}`);
+    const tempArr = keys.map((key: any) => `${rest[key as keyof typeof rest]} ${key}`);
     return `linear-gradient(${direction}, ${tempArr.join(',')})`;
   }
   return `linear-gradient(${direction}, ${from}, ${to})`;
@@ -95,11 +103,35 @@ export function getIEVersion() {
 }
 
 /**
+ * Safari Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15
+ * FireFox Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/114.0
+ * Chrome Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36
+ * Chrome 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.3
+ * 搜狗 Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.87 Safari/537.36 SE 2.X MetaSr 1.
+ * 360 Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.6045.9 Safari/537.36 QIHU 360EE
+ */
+export function getFlexGapPolyFill() {
+  if (typeof navigator === 'undefined' || !navigator) return false;
+  const ua = navigator.userAgent;
+  const chromeMatch = ua.match(/AppleWebKit.+Chrome\/(.+) Safari\/.+/i);
+  if (Number(chromeMatch?.[1]?.split('.')[0]) < 100) return true;
+  const safariMatch = ua.match(/AppleWebKit.+Version\/(.+) Safari\/.+/i);
+  if (Number(safariMatch?.[1]?.split('.')[0]) < 12) return true;
+  const ieVersion = getIEVersion();
+  if (ieVersion <= 11) return true;
+  const fireFoxMatch = ua.match(/Firefox\/(.+)/i);
+  if (Number(fireFoxMatch?.[1]?.split('.')[0]) < 100) return true;
+  return false;
+}
+
+/**
  * 计算字符串字符的长度并可以截取字符串。
  * @param str 传入字符串
  * @param maxCharacter 规定最大字符串长度
  * @returns 当没有传入maxCharacter时返回字符串字符长度，当传入maxCharacter时返回截取之后的字符串和长度。
  */
+export function getCharacterLength(str: string): number;
+export function getCharacterLength(str: string, maxCharacter?: number): { length: number; characters: string }
 export function getCharacterLength(str: string, maxCharacter?: number) {
   const hasMaxCharacter = isNumber(maxCharacter);
   if (!str || str.length === 0) {
@@ -114,7 +146,7 @@ export function getCharacterLength(str: string, maxCharacter?: number) {
   let len = 0;
   for (let i = 0; i < str.length; i++) {
     let currentStringLength = 0;
-    if (str.charCodeAt(i) > 127 || str.charCodeAt(i) === 94) {
+    if (str.charCodeAt(i) > 127) {
       currentStringLength = 2;
     } else {
       currentStringLength = 1;
