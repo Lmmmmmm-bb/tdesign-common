@@ -1,13 +1,7 @@
-import isArray from 'lodash/isArray';
-import isFunction from 'lodash/isFunction';
-import isNumber from 'lodash/isNumber';
-import isString from 'lodash/isString';
-import difference from 'lodash/difference';
-import camelCase from 'lodash/camelCase';
-import isPlainObject from 'lodash/isPlainObject';
+import { isArray, isFunction, isNumber, isString, difference, camelCase, isPlainObject } from 'lodash-es';
 import mitt from 'mitt';
 
-import { TreeNode } from './tree-node';
+import { TreeNode, privateKey } from './tree-node';
 import {
   TreeNodeValue,
   TypeIdMap,
@@ -19,6 +13,7 @@ import {
   TypeTreeFilterOptions,
   TypeRelatedNodesOptions,
   TypeTreeEventState,
+  TypeUpdatedMap,
 } from './types';
 
 function nextTick(fn: () => void): Promise<void> {
@@ -51,6 +46,7 @@ function nextTick(fn: () => void): Promise<void> {
  * @param {boolean} [options.checkable=false] 节点是否可选中
  * @param {boolean} [options.checkStrictly=false] 节点选中是否使用严格模式
  * @param {boolean} [options.disabled=false] 节点是否禁用
+ * @param {boolean|function} [options.disableCheck=false] 节点被禁用的条件
  * @param {boolean} [options.draggable=false] 节点是否可拖动
  * @param {function} [options.load=null] 节点延迟加载函数
  * @param {boolean} [options.lazy=false] 节点是否使用延迟加载模式
@@ -72,7 +68,7 @@ export class TreeStore {
   public nodeMap: Map<TreeNodeValue, TreeNode>;
 
   // 节点 私有 ID 映射
-  public privateMap: Map<string, TreeNode>;
+  public privateMap: Map<TreeNodeValue, TreeNode>;
 
   // 配置选项
   public config: TypeTreeStoreOptions;
@@ -81,7 +77,7 @@ export class TreeStore {
   public activedMap: TypeIdMap;
 
   // 数据被更新的节点集合
-  public updatedMap: TypeIdMap;
+  public updatedMap: TypeUpdatedMap;
 
   // 选中节点集合
   public checkedMap: TypeIdMap;
@@ -120,6 +116,7 @@ export class TreeStore {
       checkable: false,
       checkStrictly: false,
       disabled: false,
+      disableCheck: false,
       draggable: false,
       load: null,
       lazy: false,
@@ -162,10 +159,12 @@ export class TreeStore {
   public setConfig(options: TypeTreeStoreOptions) {
     const { config } = this;
     let hasChanged = false;
-    Object.keys(options).forEach((key) => {
+    (Object.keys(options) as (keyof TypeTreeStoreOptions)[]).forEach((key) => {
       const val = options[key];
       if (val !== config[key]) {
         hasChanged = true;
+        // @ts-ignore
+        // TODO: https://github.com/microsoft/TypeScript/issues/32693
         config[key] = val;
       }
     });
@@ -286,7 +285,7 @@ export class TreeStore {
     } else if (item instanceof TreeNode) {
       val = item.value;
     }
-    if (!val) {
+    if (!val && val !== 0) {
       nodes = this.nodes.slice(0);
     } else {
       const node = this.getNode(val);
@@ -313,6 +312,8 @@ export class TreeStore {
       if (isPlainObject(conf.props)) {
         nodes = nodes.filter((node) => {
           const result = Object.keys(conf.props).every((key) => {
+            // @ts-ignore
+            // TODO: https://github.com/microsoft/TypeScript/issues/32693
             const propEqual = node[key] === conf.props[key];
             return propEqual;
           });
@@ -342,10 +343,6 @@ export class TreeStore {
    * @return void
    */
   public reload(list: TypeTreeNodeData[]): void {
-    this.expandedMap.clear();
-    this.checkedMap.clear();
-    this.activedMap.clear();
-    this.filterMap.clear();
     this.removeAll();
     this.append(list);
   }
@@ -492,9 +489,17 @@ export class TreeStore {
    * @return void
    */
   public updated(node?: TreeNode): void {
-    if (node?.value) {
-      this.updatedMap.set(node.value, true);
+    const { updatedMap } = this;
+    if (node) {
+      // 传入节点，则为指定节点的更新
+      updatedMap.set(node[privateKey], 'changed');
+    } else {
+      // reflow 流程不传入节点，需要更新所有节点
+      this.getNodes().forEach((itemNode) => {
+        updatedMap.set(itemNode[privateKey], 'changed');
+      });
     }
+
     if (this.updateTick) return;
     this.updateTick = nextTick(() => {
       this.updateTick = null;
@@ -510,28 +515,23 @@ export class TreeStore {
       // 以便于优化锁定检查算法
       this.lockFilterPathNodes();
 
-      const updatedList = Array.from(this.updatedMap.keys());
-      if (updatedList.length > 0) {
-        // 统计需要更新状态的节点，派发更新事件
-        const updatedNodes = updatedList.map((value) => this.getNode(value));
-        this.emit('update', {
-          nodes: updatedNodes,
-          map: this.updatedMap,
-        });
-      } else if (this.shouldReflow) {
-        // 单纯的回流不需要更新节点状态
-        // 但需要触发更新事件
-        // 实际业务中，这个逻辑几乎无法触发，节点操作必然引发 update
-        // 这里代码仅仅用于边界兜底
-        this.emit('update', {
-          nodes: [],
-          map: this.updatedMap,
-        });
-      }
+      // stateId 用于单个节点状态监控
+      const stateId = `t${new Date().getTime()}`;
+      const updatedList = Array.from(updatedMap.keys());
+      const updatedNodes = updatedList.map((nodePrivateKey) => {
+        updatedMap.set(nodePrivateKey, stateId);
+        return this.privateMap.get(nodePrivateKey);
+      });
+
+      // 统计需要更新状态的节点，派发更新事件
+      this.emit('update', {
+        nodes: updatedNodes,
+        map: updatedMap,
+      });
 
       // 每次回流检查完毕，还原检查状态
       this.shouldReflow = false;
-      this.updatedMap.clear();
+      updatedMap.clear();
     });
   }
 
@@ -822,10 +822,16 @@ export class TreeStore {
    * @return void
    */
   public removeAll(): void {
-    const nodes = this.getNodes();
-    nodes.forEach((node) => {
-      node.remove();
-    });
+    this.expandedMap.clear();
+    this.checkedMap.clear();
+    this.activedMap.clear();
+    this.filterMap.clear();
+    this.nodeMap.clear();
+    this.privateMap.clear();
+    this.updatedMap.clear();
+    this.nodes = [];
+    this.children = [];
+    this.reflow();
   }
 
   /**
@@ -888,8 +894,10 @@ export class TreeStore {
   public emit(name: string, state?: TypeTreeEventState): void {
     const { config, emitter } = this;
     const methodName = camelCase(`on-${name}`);
-    const method = config[methodName];
+    const method = config[methodName as keyof TypeTreeStoreOptions];
     if (isFunction(method)) {
+      // @ts-ignore
+      // TODO: 待移除
       method(state);
     }
     emitter.emit(name, state);
